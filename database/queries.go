@@ -1,7 +1,6 @@
 package database
 
 const (
-
 	Role_SelectAll = `SELECT * FROM roles WHERE deleted_at=$1`
 
 	Permission_SelectAll = `SELECT * FROM permissions WHERE deleted_at=$1`

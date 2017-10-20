@@ -1,18 +1,17 @@
 package database
 
 import (
-	"fmt"
 	"database/sql"
+	"errors"
+	"fmt"
 	"github.com/jmoiron/sqlx"
 	"regexp"
 	"strings"
-	"errors"
 )
 
 type QueryExecFunc func(*sql.Tx) (sql.Result, error)
 
 func Exec1Row(db *sqlx.DB, query string, args ...interface{}) error {
-
 
 	result, err := db.Exec(query, args...)
 

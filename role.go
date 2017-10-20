@@ -1,14 +1,14 @@
 package goperm
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jmoiron/sqlx"
+	"github.com/roles/goperm/database"
 	"regexp"
 	"strings"
 	"time"
-	"database/sql"
-	"github.com/jmoiron/sqlx"
-	"github.com/roles/goperm/database"
 )
 
 const (
