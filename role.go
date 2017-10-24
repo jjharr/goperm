@@ -117,7 +117,7 @@ func AddNewRole(slug, name, description string) (*Role, error) {
 		DeletedAt:   time.Time{},
 	}
 
-	if err := database.Exec1Row(db, database.Role_Insert, r.Slug, r.Name, r.Description, r.CreatedAt, r.DeletedAt); err != nil {
+	if err = database.Exec1Row(db, database.Role_Insert, r.Slug, r.Name, r.Description, r.CreatedAt, r.DeletedAt); err != nil {
 		return nil, err
 	}
 
@@ -200,7 +200,7 @@ func AddRoleToUser(userId interface{}, roleSlug string) error {
 		}
 	}
 
-	if err := doRolePermInsert(role, rolePermissions, userId); err != nil {
+	if err = doRolePermInsert(role, rolePermissions, userId); err != nil {
 		return err
 	}
 
@@ -287,7 +287,7 @@ func RemoveRoleFromUser(userId interface{}, roleSlug string) error {
 		return err
 	}
 
-	if err := doRolePermRemoval(roleToRemove, permissionsToRemove, userId); err != nil {
+	if err = doRolePermRemoval(roleToRemove, permissionsToRemove, userId); err != nil {
 		return err
 	}
 
@@ -361,9 +361,7 @@ func RoleBySlug(slug string) (*Role, error) {
 	}
 
 	var r Role
-	err = db.Get(&r, database.Role_SelectBySlug, slug, time.Time{})
-
-	if err != nil {
+	if err = db.Get(&r, database.Role_SelectBySlug, slug, time.Time{}); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNoSuchRole
 		}
@@ -397,8 +395,7 @@ func RolesWithPermission(slug string) ([]Role, error) {
 	}
 
 	var roles []Role
-	err = db.Select(&roles, q, slug, time.Time{})
-	if err != nil {
+	if err = db.Select(&roles, q, slug, time.Time{}); err != nil {
 		return nil, err
 	}
 
@@ -414,8 +411,7 @@ func CountUsersForRole(slug string) (int, error) {
 	}
 
 	var count int
-	err := db.Get(&count, database.UserRole_CountUsersForRole, args...)
-	if err != nil {
+	if err := db.Get(&count, database.UserRole_CountUsersForRole, args...); err != nil {
 		if err == sql.ErrNoRows {
 			return 0, nil
 		}
@@ -434,8 +430,7 @@ func UsersForRole(slug string) ([]User, error) {
 	}
 
 	var users = []User{}
-	err := db.Select(&users, database.UserRole_SelectUsersForRole, args...)
-	if err != nil {
+	if err := db.Select(&users, database.UserRole_SelectUsersForRole, args...); err != nil {
 		if err == sql.ErrNoRows {
 			return users, nil
 		}
@@ -502,8 +497,7 @@ func RolesForUser(userId interface{}) ([]Role, error) {
 		roles = make([]Role, 0)
 	)
 
-	err := db.Select(&roles, q, args...)
-	if err != nil {
+	if err := db.Select(&roles, q, args...); err != nil {
 		if err == sql.ErrNoRows {
 			return roles, nil
 		}
@@ -558,8 +552,7 @@ func (r *Role) AddPermission(slug, name, description string) error {
 func (r *Role) Permissions() ([]Permission, error) {
 
 	var perms = make([]Permission, 0)
-	err := db.Select(&perms, database.Role_SelectPermissions, r.Slug, time.Time{})
-	if err != nil {
+	if err := db.Select(&perms, database.Role_SelectPermissions, r.Slug, time.Time{}); err != nil {
 		if err == sql.ErrNoRows {
 			return perms, nil
 		}
@@ -573,8 +566,7 @@ func (r *Role) Permissions() ([]Permission, error) {
 func (r *Role) PermissionSlugs() ([]string, error) {
 
 	var permSlugs = make([]string, 0)
-	err := db.Select(&permSlugs, database.Role_SelectPermissionSlugs, r.Slug, time.Time{})
-	if err != nil && err != sql.ErrNoRows {
+	if err := db.Select(&permSlugs, database.Role_SelectPermissionSlugs, r.Slug, time.Time{}); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 
@@ -645,8 +637,7 @@ type UserPermission struct {
 func AllPermissions() ([]Permission, error) {
 
 	var permissions []Permission
-	err := db.Select(&permissions, database.Permission_SelectAll, time.Time{})
-	if err != nil {
+	if err := db.Select(&permissions, database.Permission_SelectAll, time.Time{}); err != nil {
 		return nil, err
 	}
 
@@ -675,8 +666,7 @@ func DeletePermission(slug string) error {
 		return fmt.Errorf("There are %i roles that contain the permission '%s'. Remove the permission from those roles before removing this permission.", len(r), slug)
 	}
 
-	err = database.Exec1Row(db, database.Permission_Delete, time.Now(), slug)
-	if err != nil && err != sql.ErrNoRows {
+	if err = database.Exec1Row(db, database.Permission_Delete, time.Now(), slug); err != nil && err != sql.ErrNoRows {
 		return err
 	}
 
@@ -1143,6 +1133,7 @@ func isValidDescription(desc string) (bool, error) {
 
 // isWildcardSlug returns true if the supplied slug is a valid wildcard slug, or false otherwise
 func isWildcardSlug(slug string) (bool, error) {
+
 	_, err := isValidSlug(slug, true)
 	if err != nil {
 		return false, err
