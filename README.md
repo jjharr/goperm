@@ -9,7 +9,7 @@ the remaining external dependencies.
 ### Easy to use
 Most functions just take simple strings as arguments. No cumbersome building of objects just to do a simple lookup. These strings can be implemented as constants to get better autocompletion support to make them even easier.
 
-    UserHasRole("staff.sales")
+    UserHasRole(userId, "staff.sales")
 
 ### Hierarchical roles and permissions with wildcard support
 Avoid complicated checks by using hierarchical roles or permissions with wildcards :
@@ -72,8 +72,8 @@ this is turned off, because this can be a confusing feature).
 Goperm is designed to be adapted to your own app, so it isn't quite a drop-in package. Here's what you need to do to get it up and running :
 
  1. Get dependencies. Goperm's only non-core dependency is [github.com/jmoiron/sqlx](https://github.com/jmoiron/sqlx). The tests also use [github.com/stretchr/testify/assert](https://github.com/stretchr/testify).
- 2. Create the tables. Goperm uses five tables to do its thing. Migrations in the style of [github.com/mattes/migrate](https://github.com/mattes/migrate)are provided for Postgres. Still need to port these to MySql and possibly other stores.
- 3. Set the database. The vanilla package relies on an unset instance of "database/sql". You need to pass it a configure instance from your application.
+ 2. Create the tables. Goperm uses five tables to do its thing. Migrations in the style of [github.com/mattes/migrate](https://github.com/mattes/migrate) are provided for Postgres. Still need to port these to MySql and possibly other stores.
+ 3. Set the database. The vanilla package relies on an unset instance of "*sqlx.Db". You need to pass it a configure instance from your application.
  4. Set the user. The package defines a dummy User interface with primary key typed as interface{}. You should adapt that those dummy settings to match your application.
  
  

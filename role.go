@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jjharr/goperm/database"
 	"github.com/jmoiron/sqlx"
-	"github.com/roles/goperm/database"
 	"regexp"
 	"strings"
 	"time"
@@ -63,8 +63,7 @@ type Role struct {
 func AllRoles() ([]Role, error) {
 
 	var roles []Role
-	err := db.Select(&roles, database.Role_SelectAll, time.Time{})
-	if err != nil {
+	if err := db.Select(&roles, database.Role_SelectAll, time.Time{}); err != nil {
 		return nil, err
 	}
 
@@ -101,7 +100,11 @@ func AddNewRole(slug, name, description string) (*Role, error) {
 		return nil, fmt.Errorf("'%s' is not a valid description", slug)
 	}
 
-	roleExists, _ := RoleExists(slug)
+	roleExists, err := RoleExists(slug)
+	if err != nil {
+		return nil, err
+	}
+
 	if roleExists {
 		return nil, fmt.Errorf("Cannot insert role. Role with slug '%s' already exists", slug)
 	}
@@ -114,8 +117,7 @@ func AddNewRole(slug, name, description string) (*Role, error) {
 		DeletedAt:   time.Time{},
 	}
 
-	err = database.Exec1Row(db, database.Role_Insert, r.Slug, r.Name, r.Description, r.CreatedAt, r.DeletedAt)
-	if err != nil {
+	if err := database.Exec1Row(db, database.Role_Insert, r.Slug, r.Name, r.Description, r.CreatedAt, r.DeletedAt); err != nil {
 		return nil, err
 	}
 
@@ -128,18 +130,20 @@ func AddNewRole(slug, name, description string) (*Role, error) {
 func DeleteRole(slug string) error {
 
 	_, err := RoleBySlug(slug)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("Cannot delete role with slug '%s'. It doesn't exist.", slug)
-	} else if err != nil {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("Cannot delete role with slug '%s'. It doesn't exist.", slug)
+		}
 		return err
 	}
 
-	// do any users have this role
 	count, err := CountUsersForRole(slug)
 	if err != nil {
 		return err
-	} else if count > 0 {
-		return fmt.Errorf("There are %i users that still have this role. Remove the role from those users first.", count)
+	}
+
+	if count > 0 {
+		return fmt.Errorf("There are %d users that still have this role. Remove the role from those users first.", count)
 	}
 
 	return database.Transact(db, []database.QueryExecFunc{
@@ -160,15 +164,15 @@ func AddRoleToUser(userId interface{}, roleSlug string) error {
 		return fmt.Errorf("Invalid role slug : '%s'. (wildcards are not permitted here)", roleSlug)
 	}
 
-	// look up the target role
 	role, err := RoleBySlug(roleSlug)
 	if err != nil {
 		return err
-	} else if role == nil {
+	}
+
+	if role == nil {
 		return fmt.Errorf("Failed to add role '%s' to user. That role does not exist.", roleSlug)
 	}
 
-	// look up all the roles the user currently has
 	roles, err := RolesForUser(userId)
 	if err != nil {
 		return err
@@ -181,7 +185,7 @@ func AddRoleToUser(userId interface{}, roleSlug string) error {
 	}
 
 	if !AllowDuplicatePermissions {
-		// fail if there is an overlap between rolePermissions and
+		// fail if there is an overlap between rolePermissions and userPermissions
 		userPermissions, err := PermissionsForUser(userId, UserPermissionsSet)
 		if err != nil {
 			return err
@@ -196,8 +200,7 @@ func AddRoleToUser(userId interface{}, roleSlug string) error {
 		}
 	}
 
-	err = doRolePermInsert(role, rolePermissions, userId)
-	if err != nil {
+	if err := doRolePermInsert(role, rolePermissions, userId); err != nil {
 		return err
 	}
 
@@ -207,24 +210,21 @@ func AddRoleToUser(userId interface{}, roleSlug string) error {
 // doRolePermInsert inserts a role and the set of permissions associated with it
 func doRolePermInsert(role *Role, perms []Permission, userId interface{}) error {
 
-	var now = time.Now()
-
-	txFuncs := []database.QueryExecFunc{
-		database.TxExecFunc(database.UserRole_AddToUser, userId, role.Slug, now),
-	}
+	var (
+		now     = time.Now()
+		txFuncs = []database.QueryExecFunc{
+			database.TxExecFunc(database.UserRole_AddToUser, userId, role.Slug, now),
+		}
+	)
 
 	if len(perms) > 0 {
 
-		// this is slightly hacky
+		// this is a slightly hacky way to do a multi-insert
 		valueStrings := make([]string, 0, len(perms))
 		valueArgs := make([]interface{}, 0, len(perms)*5)
 		for i := range perms {
 			valueStrings = append(valueStrings, "(?, ?, ?, ?, ?)")
-			valueArgs = append(valueArgs, userId)
-			valueArgs = append(valueArgs, perms[i].Slug)
-			valueArgs = append(valueArgs, false)
-			valueArgs = append(valueArgs, now)
-			valueArgs = append(valueArgs, time.Time{})
+			valueArgs = append(valueArgs, userId, perms[i].Slug, false, now, time.Time{})
 		}
 		stmt := fmt.Sprintf("INSERT INTO users__permissions (user_id,permission_slug,added_on_user,created_at,deleted_at) VALUES %s", strings.Join(valueStrings, ","))
 		txFuncs = append(txFuncs, database.TxExecFunc(stmt, valueArgs...))
@@ -246,20 +246,19 @@ func RemoveRoleFromUser(userId interface{}, roleSlug string) error {
 		return fmt.Errorf("'%s' is not a valid roleSlug", roleSlug)
 	}
 
-	// look up all the userRoles the user currently has
 	userRoles, err := RolesForUser(userId)
 	if err != nil {
 		return err
 	}
 
-	var userHasRole = false
+	var userHasRole bool
 	for _, v := range userRoles {
 		if v.Slug == roleSlug {
 			userHasRole = true
 		}
 	}
 
-	// don't error out if the user doesn't have the roleToRemove
+	// don't error out if the user doesn't have the role
 	if !userHasRole {
 		return nil
 	}
@@ -268,7 +267,9 @@ func RemoveRoleFromUser(userId interface{}, roleSlug string) error {
 	roleToRemove, err := RoleBySlug(roleSlug)
 	if err != nil {
 		return err
-	} else if roleToRemove == nil {
+	}
+
+	if roleToRemove == nil {
 		return fmt.Errorf("Failed to add roleToRemove '%s' to user. That roleToRemove does not exist.", roleSlug)
 	}
 
@@ -286,8 +287,7 @@ func RemoveRoleFromUser(userId interface{}, roleSlug string) error {
 		return err
 	}
 
-	err = doRolePermRemoval(roleToRemove, permissionsToRemove, userId)
-	if err != nil {
+	if err := doRolePermRemoval(roleToRemove, permissionsToRemove, userId); err != nil {
 		return err
 	}
 
@@ -338,9 +338,10 @@ func RoleExists(slug string) (bool, error) {
 	}
 
 	_, err = RoleBySlug(slug)
-	if err == ErrNoSuchRole {
-		return false, nil
-	} else if err != nil {
+	if err != nil {
+		if err == ErrNoSuchRole {
+			return false, nil
+		}
 		return false, err
 	}
 
@@ -362,9 +363,10 @@ func RoleBySlug(slug string) (*Role, error) {
 	var r Role
 	err = db.Get(&r, database.Role_SelectBySlug, slug, time.Time{})
 
-	if err == sql.ErrNoRows {
-		return nil, ErrNoSuchRole
-	} else if err != nil {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNoSuchRole
+		}
 		return nil, fmt.Errorf("Error fetching role: %s", slug)
 	}
 
@@ -416,9 +418,8 @@ func CountUsersForRole(slug string) (int, error) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, nil
-		} else {
-			return 0, err
 		}
+		return 0, err
 	}
 
 	return count, nil
@@ -437,9 +438,8 @@ func UsersForRole(slug string) ([]User, error) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return users, nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 
 	return users, nil
@@ -494,24 +494,20 @@ func UserHasRole(userId interface{}, slug string) (bool, error) {
 func RolesForUser(userId interface{}) ([]Role, error) {
 
 	var (
-		q    string
-		args []interface{}
+		q    = database.Role_SelectAllForUser
+		args = []interface{}{
+			userId,
+			time.Time{},
+		}
+		roles = make([]Role, 0)
 	)
 
-	q = database.Role_SelectAllForUser
-	args = []interface{}{
-		userId,
-		time.Time{},
-	}
-
-	var roles = make([]Role, 0)
 	err := db.Select(&roles, q, args...)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return roles, nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 
 	return roles, nil
@@ -537,9 +533,7 @@ func (r *Role) AddPermission(slug, name, description string) error {
 	}
 
 	if !permissionExists {
-
-		_, err = AddNewPermission(slug, name, description)
-		if err != nil {
+		if _, err = AddNewPermission(slug, name, description); err != nil {
 			return err
 		}
 	}
@@ -553,8 +547,7 @@ func (r *Role) AddPermission(slug, name, description string) error {
 		return nil
 	}
 
-	err = database.Exec1Row(db, database.RolesPermissions_AddPermissionToRole, r.Slug, slug, time.Now(), time.Time{})
-	if err != nil {
+	if err = database.Exec1Row(db, database.RolesPermissions_AddPermissionToRole, r.Slug, slug, time.Now(), time.Time{}); err != nil {
 		return err
 	}
 
@@ -569,9 +562,8 @@ func (r *Role) Permissions() ([]Permission, error) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return perms, nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 
 	return perms, nil
@@ -624,8 +616,7 @@ func (r *Role) HasPermission(slug string) (bool, error) {
 		time.Time{},
 	}
 
-	err = db.Get(&count, query, args...)
-	if err != nil {
+	if err = db.Get(&count, query, args...); err != nil {
 		return false, err
 	}
 
@@ -704,10 +695,10 @@ func PermissionExists(slug string) (bool, error) {
 		return false, fmt.Errorf("'%s' is not a valid slug", slug)
 	}
 
-	_, err = PermissionBySlug(slug)
-	if err == ErrNoSuchPermission {
-		return false, nil
-	} else if err != nil {
+	if _, err = PermissionBySlug(slug); err != nil {
+		if err == ErrNoSuchPermission {
+			return false, nil
+		}
 		return false, err
 	}
 
@@ -727,11 +718,10 @@ func PermissionBySlug(slug string) (*Permission, error) {
 	}
 
 	var p Permission
-	err = db.Get(&p, database.Permission_SelectBySlug, slug, time.Time{})
-
-	if err == sql.ErrNoRows {
-		return nil, ErrNoSuchPermission
-	} else if err != nil {
+	if err = db.Get(&p, database.Permission_SelectBySlug, slug, time.Time{}); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNoSuchPermission
+		}
 		return nil, fmt.Errorf("Error fetching permission: %s", slug)
 	}
 
@@ -758,9 +748,8 @@ func AddPermissionToUser(userId, slug string) error {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("The permission slug '%s' doesn't exist.", slug)
-		} else {
-			return fmt.Errorf("Failed to look up permission slug '%s'.", slug)
 		}
+		return fmt.Errorf("Failed to look up permission slug '%s'.", slug)
 	}
 
 	if !exists {
@@ -768,8 +757,7 @@ func AddPermissionToUser(userId, slug string) error {
 	}
 
 	var existingPerms []UserPermission
-	err = db.Select(&existingPerms, database.UserPermission_SelectForUser, userId, time.Time{})
-	if err != nil && err != sql.ErrNoRows {
+	if err = db.Select(&existingPerms, database.UserPermission_SelectForUser, userId, time.Time{}); err != nil && err != sql.ErrNoRows {
 		return err
 	}
 
@@ -778,14 +766,11 @@ func AddPermissionToUser(userId, slug string) error {
 			if v.AddedOnUser {
 				return nil // no-op if already added correctly
 			}
-
 			return fmt.Errorf("User already has permission added via a role '%s'.", slug)
 		}
 	}
 
-	// user_id,permission_slug,added_on_user,created_at,deleted_at
-	err = database.Exec1Row(db, database.UserPermission_Insert, userId, slug, true, time.Now(), time.Time{})
-	if err != nil {
+	if err = database.Exec1Row(db, database.UserPermission_Insert, userId, slug, true, time.Now(), time.Time{}); err != nil {
 		return err
 	}
 
@@ -804,8 +789,7 @@ func PermissionsForUser(userId interface{}, set PermissionSetType) ([]Permission
 	}
 
 	var existingPerms []Permission
-	err := db.Select(&existingPerms, q, userId, time.Time{})
-	if err != nil && err != sql.ErrNoRows {
+	if err := db.Select(&existingPerms, q, userId, time.Time{}); err != nil && err != sql.ErrNoRows {
 		return existingPerms, err
 	}
 
@@ -836,8 +820,7 @@ func UsersWithPermission(slug string) ([]User, error) {
 		q = database.UserPermission_SelectUsersForPermissionWildcard
 	}
 
-	err = db.Select(&users, q, slug, time.Time{})
-	if err != nil && err != sql.ErrNoRows {
+	if err = db.Select(&users, q, slug, time.Time{}); err != nil && err != sql.ErrNoRows {
 		return users, err
 	}
 
@@ -859,8 +842,7 @@ func RemovePermissionFromUser(userId, slug string) error {
 	}
 
 	var up UserPermission
-	err = db.Get(&up, database.UserPermission_SelectBySlug, userId, slug, time.Time{})
-	if err != nil {
+	if err = db.Get(&up, database.UserPermission_SelectBySlug, userId, slug, time.Time{}); err != nil {
 		return err
 	}
 
@@ -872,8 +854,7 @@ func RemovePermissionFromUser(userId, slug string) error {
 		return fmt.Errorf("Permission '%s' cannot be removed because it was added via a role", slug)
 	}
 
-	err = database.Exec1Row(db, database.UserPermission_Delete, time.Now(), userId, slug)
-	if err != nil {
+	if err = database.Exec1Row(db, database.UserPermission_Delete, time.Now(), userId, slug); err != nil {
 		return err
 	}
 
@@ -929,8 +910,7 @@ func AddNewPermission(slug, name, description string) (*Permission, error) {
 		DeletedAt:   time.Time{},
 	}
 
-	err = database.Exec1Row(db, database.Permission_Insert, p.Slug, p.Name, p.Description, p.CreatedAt, p.DeletedAt)
-	if err != nil {
+	if err = database.Exec1Row(db, database.Permission_Insert, p.Slug, p.Name, p.Description, p.CreatedAt, p.DeletedAt); err != nil {
 		return nil, err
 	}
 
@@ -953,9 +933,9 @@ func (p *Permission) Matches(slug string) (bool, error) {
 	if isWildcard {
 		slug := trimWildcard(slug)
 		return strings.HasPrefix(p.Slug, slug), nil
-	} else {
-		return p.Slug == slug, nil
 	}
+
+	return p.Slug == slug, nil
 }
 
 // Roles returns the Role objects that contain this permission
@@ -971,8 +951,7 @@ func (p *Permission) Roles() ([]Role, error) {
 	}
 
 	var roles = []Role{}
-	err = db.Select(&roles, database.Permission_SelectRoles, p.Slug, time.Time{})
-	if err != nil {
+	if err = db.Select(&roles, database.Permission_SelectRoles, p.Slug, time.Time{}); err != nil {
 		return nil, err
 	}
 
@@ -1007,13 +986,10 @@ func uniquePermissionsForRoles(roles []Role) ([]Permission, error) {
 
 	q, args, err := database.ProcessNamedQueryForIn(database.Permission_AllForRoles, arg)
 	if err != nil {
-		fmt.Printf("Err1: %s\n", err.Error())
 		return nil, err
 	}
 
-	err = db.Select(&permSlice, q, args...)
-	if err != nil {
-		fmt.Printf("Err2: %s\n", err.Error())
+	if err = db.Select(&permSlice, q, args...); err != nil {
 		return nil, err
 	}
 
@@ -1103,9 +1079,10 @@ func UserHasPermission(userId interface{}, slug string) (bool, error) {
 		time.Time{},
 	})
 
-	if err == sql.ErrNoRows {
-		return false, nil
-	} else if err != nil {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
 		return false, fmt.Errorf("Error fetching role: %s", slug)
 	}
 
